@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "{\"assistant_id\":\"product_description_crafter\",\"ident\":\"ARIE-623500\",\"ean\":\"8003705114265\",\"libelle\":\"FER A REP. 6235/00 POURPE ARIETE\",\"marque\":\"ARIETE\",\"description\":\"\",\"instructions\":\"\",\"refFournisseur\":\"623500\",\"fournisseur\":\"ARIE\",\"lib_fournisseur\":\"Ariete\",\"famille\":\"ELEC\",\"lib_famille\":\"Petit Electroménager\",\"arcoul\":\"POURPRE\",\"coll\":\"\",\"dimensions\":\"\",\"url\":\"\",\"images_url\":null,\"file_url\":null,\"nompropr\":\"\",\"valpropr\":\"\",\"craft_try\":0,\"prixttc\":39.99,\"profilFamille\":null}"
+    }
+  ]
+}

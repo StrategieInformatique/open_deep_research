@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "{\"assistant_id\":\"product_description_crafter\",\"ident\":\"DELO-IS2144BK\",\"ean\":\"8021098280152\",\"libelle\":\"CENTRALE VAPEUR IS2144BK NOIR BRAUN\",\"marque\":\"BRAUN\",\"description\":\"\",\"instructions\":\"\",\"refFournisseur\":\"IS2144BK\",\"fournisseur\":\"DELO\",\"lib_fournisseur\":\"Delonghi\",\"famille\":\"ELEC\",\"lib_famille\":\"Electroménager\",\"arcoul\":\"NOIR\",\"coll\":\"\",\"dimensions\":\"30x20x15cm\",\"url\":\"\",\"images_url\":\"https://hiyciqitdagwmudapohf.supabase.co/storage/v1/object/public/associmages/MCC/articlesImg/DELO-IS2144BK/\",\"file_url\":null,\"nompropr\":\"\",\"valpropr\":\"\",\"craft_try\":0,\"prixttc\":179.99,\"profilFamille\":null}"
+    }
+  ]
+}

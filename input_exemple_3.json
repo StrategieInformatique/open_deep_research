@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "{\"article_id\":\"TEST-001\",\"libelle\":\"CENTRALE VAPEUR TEST\",\"marque\":\"TESTBRAND\",\"ean\":\"1234567890123\",\"reference_fournisseur\":\"REF-001\",\"famille_produit\":\"ELEC\"}"
+    }
+  ]
+}

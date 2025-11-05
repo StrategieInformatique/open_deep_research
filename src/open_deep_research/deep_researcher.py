@@ -117,18 +117,24 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Comman
 
 async def write_research_brief(state: AgentState, config: RunnableConfig) -> Command[Literal["research_supervisor"]]:
     """Transform user messages into a structured research brief and initialize supervisor.
-    
+
     This function analyzes the user's messages and generates a focused research brief
     that will guide the research supervisor. It also sets up the initial supervisor
     context with appropriate prompts and instructions.
-    
+
+    For Article Enrichment: Detects article_payload and creates enrichment-specific brief.
+
     Args:
         state: Current agent state containing user messages
         config: Runtime configuration with model settings
-        
+
     Returns:
         Command to proceed to research supervisor with initialized context
     """
+    from open_deep_research.prompts import article_enrichment_transform_prompt, article_enrichment_supervisor_prompt
+    from open_deep_research.state import ArticlePayload
+    import json
+
     # Step 1: Set up the research model for structured output
     configurable = Configuration.from_runnable_config(config)
     research_model_config = {
@@ -137,7 +143,7 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
         "api_key": get_api_key_for_model(configurable.research_model, config),
         "tags": ["langsmith:nostream"]
     }
-    
+
     # Configure model for structured research question generation
     research_model = (
         configurable_model
@@ -145,34 +151,105 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
         .with_config(research_model_config)
     )
-    
-    # Step 2: Generate structured research brief from user messages
-    prompt_content = transform_messages_into_research_topic_prompt.format(
-        messages=get_buffer_string(state.get("messages", [])),
-        date=get_today_str()
-    )
-    response = await research_model.ainvoke([HumanMessage(content=prompt_content)])
-    
-    # Step 3: Initialize supervisor with research brief and instructions
-    supervisor_system_prompt = lead_researcher_prompt.format(
-        date=get_today_str(),
-        max_concurrent_research_units=configurable.max_concurrent_research_units,
-        max_researcher_iterations=configurable.max_researcher_iterations
-    )
-    
-    return Command(
-        goto="research_supervisor", 
-        update={
-            "research_brief": response.research_brief,
-            "supervisor_messages": {
-                "type": "override",
-                "value": [
-                    SystemMessage(content=supervisor_system_prompt),
-                    HumanMessage(content=response.research_brief)
-                ]
+
+    # Step 2: Check if this is an article enrichment request
+    messages = state.get("messages", [])
+    article_payload = None
+    is_enrichment = False
+
+    # Try to detect article payload from messages
+    for msg in messages:
+        content = msg.content if hasattr(msg, 'content') else str(msg)
+        try:
+            # Try to parse as JSON
+            if isinstance(content, str) and '{' in content:
+                data = json.loads(content)
+                # Detect article payload by checking for key fields (Optimia_v2 compatible)
+                if 'ident' in data or 'article_id' in data or 'ean' in data or 'libelle' in data:
+                    # Map old field names to new if needed
+                    if 'article_id' in data and 'ident' not in data:
+                        data['ident'] = data['article_id']
+                    if 'reference_fournisseur' in data and 'refFournisseur' not in data:
+                        data['refFournisseur'] = data['reference_fournisseur']
+                    if 'famille_produit' in data and 'famille' not in data:
+                        data['famille'] = data['famille_produit']
+
+                    article_payload = ArticlePayload(**data)
+                    is_enrichment = True
+                    break
+        except (json.JSONDecodeError, ValueError, Exception) as e:
+            continue
+
+    # Step 3: Generate research brief based on mode
+    if is_enrichment and article_payload:
+        # Article enrichment mode - Format Optimia_v2 complet
+        article_info = f"""
+Product: {article_payload.libelle}
+Brand: {article_payload.marque or 'N/A'}
+EAN: {article_payload.ean or 'N/A'}
+Article ID: {article_payload.ident}
+Supplier Ref: {article_payload.refFournisseur or 'N/A'}
+Supplier: {article_payload.lib_fournisseur or article_payload.fournisseur or 'N/A'}
+Category: {article_payload.lib_famille or article_payload.famille or 'N/A'}
+Color: {article_payload.arcoul or 'N/A'}
+Dimensions: {article_payload.dimensions or 'N/A'}
+Price TTC: {article_payload.prixttc or 'N/A'}
+"""
+        prompt_content = article_enrichment_transform_prompt.format(
+            article_payload=json.dumps(article_payload.dict(), indent=2),
+            date=get_today_str()
+        )
+        response = await research_model.ainvoke([HumanMessage(content=prompt_content)])
+
+        # Use enrichment-specific supervisor prompt
+        supervisor_system_prompt = article_enrichment_supervisor_prompt.format(
+            date=get_today_str(),
+            research_brief=response.research_brief,
+            article_info=article_info
+        )
+
+        return Command(
+            goto="research_supervisor",
+            update={
+                "research_brief": response.research_brief,
+                "article_payload": article_payload,
+                "supervisor_messages": {
+                    "type": "override",
+                    "value": [
+                        SystemMessage(content=supervisor_system_prompt),
+                        HumanMessage(content=f"Start enrichment for: {article_payload.libelle}")
+                    ]
+                }
             }
-        }
-    )
+        )
+    else:
+        # Normal research mode
+        prompt_content = transform_messages_into_research_topic_prompt.format(
+            messages=get_buffer_string(messages),
+            date=get_today_str()
+        )
+        response = await research_model.ainvoke([HumanMessage(content=prompt_content)])
+
+        # Use normal research prompt
+        supervisor_system_prompt = lead_researcher_prompt.format(
+            date=get_today_str(),
+            max_concurrent_research_units=configurable.max_concurrent_research_units,
+            max_researcher_iterations=configurable.max_researcher_iterations
+        )
+
+        return Command(
+            goto="research_supervisor",
+            update={
+                "research_brief": response.research_brief,
+                "supervisor_messages": {
+                    "type": "override",
+                    "value": [
+                        SystemMessage(content=supervisor_system_prompt),
+                        HumanMessage(content=response.research_brief)
+                    ]
+                }
+            }
+        )
 
 
 async def supervisor(state: SupervisorState, config: RunnableConfig) -> Command[Literal["supervisor_tools"]]:
@@ -606,23 +683,35 @@ researcher_subgraph = researcher_builder.compile()
 
 async def final_report_generation(state: AgentState, config: RunnableConfig):
     """Generate the final comprehensive research report with retry logic for token limits.
-    
-    This function takes all collected research findings and synthesizes them into a 
+
+    This function takes all collected research findings and synthesizes them into a
     well-structured, comprehensive final report using the configured report generation model.
-    
+
+    For Article Enrichment: Returns JSON with routing decision and found links.
+
     Args:
         state: Agent state containing research findings and context
         config: Runtime configuration with model settings and API keys
-        
+
     Returns:
-        Dictionary containing the final report and cleared state
+        Dictionary containing the final report (or JSON) and cleared state
     """
+    from open_deep_research.prompts import article_enrichment_final_report_prompt
+    from open_deep_research.state import extract_asin_from_url, extract_domain_from_url, AmazonProduct, WebSource
+    import json
+    import re
+
     # Step 1: Extract research findings and prepare state cleanup
     notes = state.get("notes", [])
+    raw_notes = state.get("raw_notes", [])
     cleared_state = {"notes": {"type": "override", "value": []}}
     findings = "\n".join(notes)
-    
-    # Step 2: Configure the final report generation model
+
+    # Step 2: Check if this is an article enrichment request
+    article_payload = state.get("article_payload")
+    is_enrichment = article_payload is not None
+
+    # Step 3: Configure the final report generation model
     configurable = Configuration.from_runnable_config(config)
     writer_model_config = {
         "model": configurable.final_report_model,
@@ -630,71 +719,159 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
         "api_key": get_api_key_for_model(configurable.final_report_model, config),
         "tags": ["langsmith:nostream"]
     }
-    
-    # Step 3: Attempt report generation with token limit retry logic
-    max_retries = 3
-    current_retry = 0
-    findings_token_limit = None
-    
-    while current_retry <= max_retries:
-        try:
-            # Create comprehensive prompt with all research context
-            final_report_prompt = final_report_generation_prompt.format(
-                research_brief=state.get("research_brief", ""),
-                messages=get_buffer_string(state.get("messages", [])),
-                findings=findings,
-                date=get_today_str()
-            )
-            
-            # Generate the final report
-            final_report = await configurable_model.with_config(writer_model_config).ainvoke([
-                HumanMessage(content=final_report_prompt)
-            ])
-            
-            # Return successful report generation
-            return {
-                "final_report": final_report.content, 
-                "messages": [final_report],
-                **cleared_state
+
+    if is_enrichment:
+        # ===== ARTICLE ENRICHMENT MODE =====
+        # Extract Amazon products and web sources from findings
+        amazon_products = []
+        web_sources = []
+
+        # Parse findings to extract URLs
+        all_content = findings + "\n".join(raw_notes)
+        urls = re.findall(r'https?://[^\s<>"]+|www\.[^\s<>"]+', all_content)
+
+        for url in urls:
+            domain = extract_domain_from_url(url)
+            if domain and 'amazon' in domain:
+                asin = extract_asin_from_url(url)
+                if asin:
+                    amazon_products.append({
+                        "asin": asin,
+                        "domain": domain,
+                        "url": url,
+                        "title": f"Product {asin}",
+                        "score": 0.85
+                    })
+            elif domain:
+                web_sources.append({
+                    "url": url,
+                    "domain": domain,
+                    "title": f"Source from {domain}",
+                    "score": 0.75
+                })
+
+        # Determine routing based on findings
+        enrichment_type = "EN_ATTENTE"
+        next_subgraph = "pending_node"
+        confidence_score = 0.0
+        justification = "Insufficient data found"
+
+        if amazon_products:
+            enrichment_type = "REFERENTIEL"
+            next_subgraph = "amazon_subgraph"
+            confidence_score = 0.85
+            justification = f"Found {len(amazon_products)} Amazon product(s) with ASIN"
+        elif len(web_sources) >= configurable.min_web_sources:
+            enrichment_type = "WEB"
+            next_subgraph = "web_subgraph"
+            confidence_score = 0.70
+            justification = f"Found {len(web_sources)} quality web sources"
+        elif article_payload.images_disponibles and (article_payload.specifications_techniques or article_payload.dimensions or article_payload.arcoul):
+            # Check for images + any technical data (specs, dimensions, color)
+            enrichment_type = "GENERATIF"
+            next_subgraph = "generative_subgraph"
+            confidence_score = 0.60
+            justification = "No online presence but has images and technical data"
+
+        # Create JSON routing decision (Optimia_v2 compatible)
+        routing_json = {
+            "enrichment_type": enrichment_type,
+            "confidence_score": confidence_score,
+            "justification": justification,
+            "next_subgraph": next_subgraph,
+            "amazon_products": amazon_products[:5],  # Limit to 5
+            "web_sources": web_sources[:10],  # Limit to 10
+            "search_summary": {
+                "total_findings": len(notes),
+                "amazon_results": len(amazon_products),
+                "web_results": len(web_sources),
+                "ident": article_payload.ident,
+                "article_id": article_payload.article_id,  # Alias for compatibility
+                "ean": article_payload.ean,
+                "libelle": article_payload.libelle,
+                "marque": article_payload.marque,
+                "famille": article_payload.famille,
+                "lib_famille": article_payload.lib_famille
             }
-            
-        except Exception as e:
-            # Handle token limit exceeded errors with progressive truncation
-            if is_token_limit_exceeded(e, configurable.final_report_model):
-                current_retry += 1
-                
-                if current_retry == 1:
-                    # First retry: determine initial truncation limit
-                    model_token_limit = get_model_token_limit(configurable.final_report_model)
-                    if not model_token_limit:
-                        return {
-                            "final_report": f"Error generating final report: Token limit exceeded, however, we could not determine the model's maximum context length. Please update the model map in deep_researcher/utils.py with this information. {e}",
-                            "messages": [AIMessage(content="Report generation failed due to token limits")],
-                            **cleared_state
-                        }
-                    # Use 4x token limit as character approximation for truncation
-                    findings_token_limit = model_token_limit * 4
-                else:
-                    # Subsequent retries: reduce by 10% each time
-                    findings_token_limit = int(findings_token_limit * 0.9)
-                
-                # Truncate findings and retry
-                findings = findings[:findings_token_limit]
-                continue
-            else:
-                # Non-token-limit error: return error immediately
+        }
+
+        json_report = json.dumps(routing_json, indent=2, ensure_ascii=False)
+
+        return {
+            "final_report": json_report,
+            "routing_decision": routing_json,
+            "amazon_products": amazon_products,
+            "web_sources": web_sources,
+            "messages": [AIMessage(content=f"✅ Enrichment complete: {enrichment_type}")],
+            **cleared_state
+        }
+
+    else:
+        # ===== NORMAL RESEARCH MODE =====
+        # Step 4: Attempt report generation with token limit retry logic
+        max_retries = 3
+        current_retry = 0
+        findings_token_limit = None
+
+        while current_retry <= max_retries:
+            try:
+                # Create comprehensive prompt with all research context
+                final_report_prompt = final_report_generation_prompt.format(
+                    research_brief=state.get("research_brief", ""),
+                    messages=get_buffer_string(state.get("messages", [])),
+                    findings=findings,
+                    date=get_today_str()
+                )
+
+                # Generate the final report
+                final_report = await configurable_model.with_config(writer_model_config).ainvoke([
+                    HumanMessage(content=final_report_prompt)
+                ])
+
+                # Return successful report generation
                 return {
-                    "final_report": f"Error generating final report: {e}",
-                    "messages": [AIMessage(content="Report generation failed due to an error")],
+                    "final_report": final_report.content,
+                    "messages": [final_report],
                     **cleared_state
                 }
-    
-    # Step 4: Return failure result if all retries exhausted
-    return {
-        "final_report": "Error generating final report: Maximum retries exceeded",
-        "messages": [AIMessage(content="Report generation failed after maximum retries")],
-        **cleared_state
-    }
+
+            except Exception as e:
+                # Handle token limit exceeded errors with progressive truncation
+                if is_token_limit_exceeded(e, configurable.final_report_model):
+                    current_retry += 1
+
+                    if current_retry == 1:
+                        # First retry: determine initial truncation limit
+                        model_token_limit = get_model_token_limit(configurable.final_report_model)
+                        if not model_token_limit:
+                            return {
+                                "final_report": f"Error generating final report: Token limit exceeded, however, we could not determine the model's maximum context length. Please update the model map in deep_researcher/utils.py with this information. {e}",
+                                "messages": [AIMessage(content="Report generation failed due to token limits")],
+                                **cleared_state
+                            }
+                        # Use 4x token limit as character approximation for truncation
+                        findings_token_limit = model_token_limit * 4
+                    else:
+                        # Subsequent retries: reduce by 10% each time
+                        findings_token_limit = int(findings_token_limit * 0.9)
+
+                    # Truncate findings and retry
+                    findings = findings[:findings_token_limit]
+                    continue
+                else:
+                    # Non-token-limit error: return error immediately
+                    return {
+                        "final_report": f"Error generating final report: {e}",
+                        "messages": [AIMessage(content="Report generation failed due to an error")],
+                        **cleared_state
+                    }
+
+        # Step 5: Return failure result if all retries exhausted
+        return {
+            "final_report": "Error generating final report: Maximum retries exceeded",
+            "messages": [AIMessage(content="Report generation failed after maximum retries")],
+            **cleared_state
+        }
 
 # Main Deep Researcher Graph Construction
 # Creates the complete deep research workflow from user input to final report

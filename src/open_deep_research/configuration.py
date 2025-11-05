@@ -232,6 +232,189 @@ class Configuration(BaseModel):
         }
     )
 
+    # Article Enrichment Configuration
+    amazon_domains: List[str] = Field(
+        default=["amazon.fr", "amazon.it", "amazon.com", "amazon.es", "amazon.de", "amazon.co.uk"],
+        metadata={
+            "x_oap_ui_config": {
+                "type": "array",
+                "default": ["amazon.fr", "amazon.it", "amazon.com", "amazon.es", "amazon.de", "amazon.co.uk"],
+                "description": "List of Amazon domains to search for products"
+            }
+        }
+    )
+    search_languages: List[str] = Field(
+        default=["french", "english", "italian", "spanish", "german"],
+        metadata={
+            "x_oap_ui_config": {
+                "type": "array",
+                "default": ["french", "english", "italian", "spanish", "german"],
+                "description": "Languages to use for multi-lingual search queries"
+            }
+        }
+    )
+    max_amazon_searches: int = Field(
+        default=3,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "slider",
+                "default": 3,
+                "min": 1,
+                "max": 10,
+                "step": 1,
+                "description": "Maximum number of Amazon search queries per article"
+            }
+        }
+    )
+    max_web_searches: int = Field(
+        default=3,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "slider",
+                "default": 3,
+                "min": 1,
+                "max": 10,
+                "step": 1,
+                "description": "Maximum number of web search queries if Amazon search fails"
+            }
+        }
+    )
+    tavily_search_depth: str = Field(
+        default="advanced",
+        metadata={
+            "x_oap_ui_config": {
+                "type": "select",
+                "default": "advanced",
+                "description": "Tavily search depth",
+                "options": [
+                    {"label": "Basic", "value": "basic"},
+                    {"label": "Advanced", "value": "advanced"}
+                ]
+            }
+        }
+    )
+    tavily_max_results: int = Field(
+        default=10,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "slider",
+                "default": 10,
+                "min": 1,
+                "max": 20,
+                "step": 1,
+                "description": "Maximum number of results per Tavily search"
+            }
+        }
+    )
+
+    # Scoring Thresholds for Routing Decisions
+    referentiel_min_confidence: float = Field(
+        default=0.75,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "slider",
+                "default": 0.75,
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "description": "Minimum confidence score to route to REFERENTIEL (Amazon)"
+            }
+        }
+    )
+    web_min_confidence: float = Field(
+        default=0.60,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "slider",
+                "default": 0.60,
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "description": "Minimum confidence score to route to WEB"
+            }
+        }
+    )
+    generatif_min_confidence: float = Field(
+        default=0.50,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "slider",
+                "default": 0.50,
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "description": "Minimum confidence score to route to GENERATIF"
+            }
+        }
+    )
+    min_web_sources: int = Field(
+        default=2,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "slider",
+                "default": 2,
+                "min": 1,
+                "max": 10,
+                "step": 1,
+                "description": "Minimum number of web sources required for WEB enrichment"
+            }
+        }
+    )
+
+    # Matching Weights for Score Calculation
+    matching_weight_ean: float = Field(
+        default=0.40,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "slider",
+                "default": 0.40,
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "description": "Weight for EAN matching in confidence score"
+            }
+        }
+    )
+    matching_weight_brand: float = Field(
+        default=0.25,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "slider",
+                "default": 0.25,
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "description": "Weight for brand matching in confidence score"
+            }
+        }
+    )
+    matching_weight_model: float = Field(
+        default=0.25,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "slider",
+                "default": 0.25,
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "description": "Weight for model/reference matching in confidence score"
+            }
+        }
+    )
+    matching_weight_category: float = Field(
+        default=0.10,
+        metadata={
+            "x_oap_ui_config": {
+                "type": "slider",
+                "default": 0.10,
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "description": "Weight for category matching in confidence score"
+            }
+        }
+    )
+
 
     @classmethod
     def from_runnable_config(
